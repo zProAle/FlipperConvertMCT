@@ -36,7 +36,7 @@ def check_uid_size(dump):
 def convert_file(input_path):
     input_extension = os.path.splitext(input_path)[1]
     
-    if input_extension == ".dump" or input_extension == ".mct":
+    if input_extension == ".dump" or input_extension == ".mct" or input_extension == ".mfd":
         with open(input_path, "rt") as file:
             dump = []
             Lines = file.readlines()

@@ -1,51 +1,58 @@
 import argparse
+import os
 
 def bytes_to_hex(b):
     return ' '.join(f"{x:02X}" for x in b)
 
-def extract_uid(block0):
+def extract_uid_and_sak(block0: bytes):
+    """
+    Estrae UID, tipo UID (4 o 7 byte), e SAK in base alla struttura del blocco 0.
+    """
     if block0[0] == 0x88:
         uid = bytes_to_hex(block0[1:4] + block0[4:7])
         uid_type = 7
+        sak = block0[8] # x UID a 7 byte
     else:
         uid = bytes_to_hex(block0[0:4])
         uid_type = 4
-    return uid, uid_type
+        sak = block0[5]  # per UID a 4 byt
+    return uid, uid_type, f"{sak:02X}"
 
 def detect_card_type_and_params(data):
     size = len(data)
     block0 = data[0:16]
-    uid, uid_length = extract_uid(block0)
+    uid, uid_length, sak = extract_uid_and_sak(block0)
 
     if size == 1024:
-        if uid_length == 7:
-            atqa = "44 00"
-            sak = "88"
-        else:
-            atqa = "04 00"
-            sak = "08"
-        return "1K", 64, uid, atqa, sak
+        atqa = "44 00" if uid_length == 7 else "04 00"
+        card_type = "1K"
+        block_count = 64
 
     elif size == 4096:
         atqa = "04 00"
-        sak = "18"
-        return "4K", 256, uid, atqa, sak
+        card_type = "4K"
+        block_count = 256
 
     elif size == 320:
         atqa = "04 00"
-        sak = "09"
-        return "Mini", 20, uid, atqa, sak
+        card_type = "Mini"
+        block_count = 20
 
     else:
-        raise ValueError(f"Invalid size: {size} bytes. Expected 320 (Mini), 1024 (1K), or 4096 (4K).")
+        raise ValueError(f"Invalid dump size: {size} bytes. Must be 320 (Mini), 1024 (1K), or 4096 (4K).")
 
-def convert_dump_to_flipper_format(dump_file, output_file, uid=None):
+    VALID_SAK_VALUES = {"08", "09", "18", "88", "89"}
+    if sak.upper() not in VALID_SAK_VALUES:
+        print(f"[WARN] SAK {sak} is not standard (possibly custom or magic tag).")
+
+    return card_type, block_count, uid, atqa, sak
+
+def convert_dump_to_flipper_format(dump_file, output_file, uid_override=None):
     with open(dump_file, "rb") as f:
         data = f.read()
 
     card_type, block_count, extracted_uid, atqa, sak = detect_card_type_and_params(data)
-
-    uid = uid or extracted_uid
+    uid = uid_override or extracted_uid
 
     print(f"[INFO] Type: Mifare Classic {card_type}")
     print(f"[INFO] UID: {uid}")
@@ -73,13 +80,17 @@ def convert_dump_to_flipper_format(dump_file, output_file, uid=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert a Mifare Classic dump to a .nfc file for Flipper Zero")
-    parser.add_argument("-i", "--input", required=True, help="Path to the .dmp file")
+    parser.add_argument("-i", "--input", required=True, help="Path to the dump file (.bin/.dmp/.hex...)")
     parser.add_argument("-o", "--output", required=True, help="Output path for the .nfc file")
-    parser.add_argument("--uid", help="Custom UID (e.g. FE:3B:17:86)")
+    parser.add_argument("--uid", help="Custom UID to override extracted one (e.g. FE:3B:17:86)")
     args = parser.parse_args()
+
+    if not os.path.exists(args.input):
+        print(f"[ERROR] Input file not found: {args.input}")
+        exit(1)
 
     convert_dump_to_flipper_format(
         dump_file=args.input,
         output_file=args.output,
-        uid=args.uid
+        uid_override=args.uid
     )
